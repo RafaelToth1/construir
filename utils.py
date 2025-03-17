@@ -1,140 +1,260 @@
-# --- Início de utils.py ---
+# utils.py (versão completa com base64)
 import streamlit as st
+import logging
+import re
 import uuid
 
-def generate_unique_id():
-    return str(uuid.uuid4())
-
-def init_groups():
-    """Inicializa a gestão dos grupos, definindo 'group_order' se não existir."""
-    if "group_order" not in st.session_state:
-        st.session_state["group_order"] = [0]  # inicia com o grupo 0
-    # Se desejar, pode inicializar também um dicionário para dados dos grupos:
-    if "groups" not in st.session_state:
-        st.session_state["groups"] = {}
-
-def add_group():
-    """Adiciona um novo grupo à lista de grupos."""
-    group_order = st.session_state["group_order"]
-    novo_id = max(group_order) + 1 if group_order else 0
-    group_order.append(novo_id)
-    st.session_state["group_order"] = group_order
-
-def remove_group(group_id):
-    """Remove todas as chaves relacionadas ao grupo e atualiza a ordem dos grupos."""
-    clear_group_state(group_id)
-    st.session_state["group_order"] = [g for g in st.session_state["group_order"] if g != group_id]
-
-def move_group_left(index):
-    """Move o grupo da posição 'index' para a posição anterior."""
-    group_order = st.session_state["group_order"]
-    if index > 0:
-        group_order[index-1], group_order[index] = group_order[index], group_order[index-1]
-        st.session_state["group_order"] = group_order
-
-def move_group_right(index):
-    """Move o grupo da posição 'index' para a posição seguinte."""
-    group_order = st.session_state["group_order"]
-    if index < len(group_order) - 1:
-        group_order[index], group_order[index+1] = group_order[index+1], group_order[index]
-        st.session_state["group_order"] = group_order
-
-def clear_group_state(group_id):
-    """Remove todas as chaves do session_state relacionadas ao grupo."""
-    for key in list(st.session_state.keys()):
-        if key.startswith(f"group{group_id}_") or key == f"group{group_id}_group_text":
-            del st.session_state[key]
-
-def export_state():
-    """
-    Exporta o estado atual da interface, ignorando chaves que não podem ser serializadas.
-    """
-    report = {
-        "group_order": st.session_state.get("group_order", []),
-        "groups": {}
+ACAO_PARAMETROS = {
+    "atalho_hotkey": {
+        "suffix": "_atalho",
+        "formato": lambda p: f"[{p}]"
+    },
+    "escrever_texto": {
+        "suffix": "_texto",
+        "formato": lambda p: f"[{p}]"
+    },
+    "inserir_item_lista": {
+        "suffix": "_texto",
+        "formato": lambda p: f"[{p}]"
+    },
+    "pressionar_teclas_basicas": {
+        "suffix": "_tecla",
+        "formato": lambda p: f"[{p}]"
+    },
+    "aguardar": {
+        "suffix": "_aguardar",
+        "formato": lambda p: f"[{p}]"
     }
-    for group_id in st.session_state.get("group_order", []):
-        group_data = {}
-        for key, value in st.session_state.items():
-            if key.startswith(f"group{group_id}_") and "file_uploader" not in key:
-                if key.endswith("_add_action") or key.endswith("_remove_action"):
-                    continue
-                group_data[key] = value
-        report["groups"][str(group_id)] = group_data
-    return report
+}
 
-def import_state(data):
-    """
-    Importa o estado da interface a partir do dicionário fornecido, limpando chaves antigas e
-    evitando reatribuir valores para widgets que não permitem setagem via st.session_state.
-    """
-    for key in list(st.session_state.keys()):
-        if key.startswith("group"):
-            del st.session_state[key]
+PREFIXO_GRUPO = lambda codigo: f"grupo{codigo}"
+PREFIXO_ACOES = lambda codigo, idx: f"{PREFIXO_GRUPO(codigo)}_acoes_acao{idx}"
 
-    if "group_order" in data:
-        st.session_state["group_order"] = data["group_order"]
+def obter_parametro_acao(codigoUnico, indiceAcao, tipoAcao):
+    config = ACAO_PARAMETROS.get(tipoAcao)
+    if not config:
+        return tipoAcao
+    valor = st.session_state.get(
+        f"{PREFIXO_ACOES(codigoUnico, indiceAcao)}{config['suffix']}",
+        ""
+    )
+    return f"{tipoAcao}{config['formato'](valor)}"
 
-    groups = data.get("groups", {})
-    for group_id, group_data in groups.items():
-        for key, value in group_data.items():
-            if key.endswith("_add_action") or key.endswith("_remove_action"):
-                continue
-            st.session_state[key] = value
-
-def generate_txt_content(group_id):
-    # Nome do grupo
-    group_name = st.session_state.get(f"group{group_id}_group_text", f"etapa_{group_id}")
-
-    # Imagem (upload principal do grupo)
-    uploaded_images = st.session_state.get(f"group{group_id}_upload_uploaded_images", [])
-    imagem_nome = uploaded_images[0]['name'] if uploaded_images else ""
-
-    # Ações (componente actions do grupo)
-    actions_key_prefix = f"group{group_id}_actions"
-    actions_list = st.session_state.get(f"{actions_key_prefix}_acoes_list", [])
-
-    acoes = []
-    for action_index in actions_list:
-        acao_key = f"{actions_key_prefix}_acao{action_index}_select"
-        acao_type = st.session_state.get(acao_key, "")
-
-        # Linha principal da ação
-        acoes.append(f"acao{action_index}:{acao_type}")
-
-        # Todos os campos possíveis (mesmo vazios)
-        if acao_type in ["escrever_texto", "inserir_item_lista"]:
-            texto = st.session_state.get(f"{actions_key_prefix}_acao{action_index}_texto", "")
-            acoes.append(f"acao{action_index}_texto:{texto}")
-
-        elif acao_type == "atalho_hotkey":
-            atalho = st.session_state.get(f"{actions_key_prefix}_acao{action_index}_atalho", "")
-            acoes.append(f"acao{action_index}_atalho:{atalho}")
-
-        elif acao_type == "pressionar_teclas_basicas":
-            tecla = st.session_state.get(f"{actions_key_prefix}_acao{action_index}_tecla", "")
-            acoes.append(f"acao{action_index}_tecla:{tecla}")
-
-    # Validar (sempre incluir)
-    validar = st.session_state.get(f"group{group_id}_validar", "Não")
-    validar = validar.lower().replace("ã", "a")  # Converte "Não" para "nao"
-
-    # Etapas (sempre incluir mesmo vazias)
-    etapa_bem = st.session_state.get(f"group{group_id}_etapa_bem_sucedida", "")
-    etapa_sem = st.session_state.get(f"group{group_id}_etapa_sem_sucesso", "")
-
-    # Montar conteúdo do TXT
-    content = [
-        f"imagem:{imagem_nome}",
-        "acoes:"
+def processar_acoes(codigoUnico, listaAcoes, processador):
+    return [
+        processador(codigoUnico, indiceAcao,
+                    st.session_state.get(f"{PREFIXO_ACOES(codigoUnico, indiceAcao)}_select", ""))
+        for indiceAcao in listaAcoes
     ]
-    content.extend(acoes)
-    content.extend([
-        f"validar:{validar}",
-        f"etapa_bem_sucedida:{etapa_bem}",
-        f"etapa_sem_sucesso:{etapa_sem}"
-    ])
 
-    return "\n".join(content)
+def processar_import_acao(codigoUnico, indice, tipoAcao, parametro):
+    config = ACAO_PARAMETROS.get(tipoAcao)
+    if config:
+        st.session_state[
+            f"{PREFIXO_ACOES(codigoUnico, indice)}{config['suffix']}"
+        ] = parametro
 
-# --- Fim de utils.py ---
+def inicializarGrupos():
+    if "ordemGrupos" not in st.session_state:
+        codigoUnico = str(uuid.uuid4())
+        st.session_state["ordemGrupos"] = [codigoUnico]
+        logging.debug("Grupo inicial criado com codigoUnico: %s", codigoUnico)
+
+def adicionarGrupo():
+    ordemGrupos = st.session_state.get("ordemGrupos", [])
+    novoCodigoUnico = str(uuid.uuid4())
+    ordemGrupos.append(novoCodigoUnico)
+    st.session_state["ordemGrupos"] = ordemGrupos
+    logging.debug("Grupo adicionado: novoCodigoUnico=%s, ordemGrupos=%s", novoCodigoUnico, ordemGrupos)
+
+def removerGrupo(codigoUnico):
+    limparEstadoGrupo(codigoUnico)
+    st.session_state["ordemGrupos"] = [g for g in st.session_state["ordemGrupos"] if g != codigoUnico]
+    logging.debug("Grupo removido: codigoUnico=%s, nova ordemGrupos=%s", codigoUnico, st.session_state["ordemGrupos"])
+
+def limparEstadoGrupo(codigoUnico):
+    prefixo = f"{PREFIXO_GRUPO(codigoUnico)}_"
+    for chave in list(st.session_state.keys()):
+        if str(chave).startswith(prefixo) or str(chave) == f"{PREFIXO_GRUPO(codigoUnico)}_group_text":
+            del st.session_state[chave]
+
+def exportarEstado():
+    relatorio = {
+        "ordemGrupos": st.session_state.get("ordemGrupos", []),
+        "grupos": {}
+    }
+    for codigoUnico in st.session_state.get("ordemGrupos", []):
+        # Processa o método de busca normal
+        metodo = st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_metodoBusca", "")
+        if metodo == "timeout":
+            timeout_val = st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_timeout_value", "2")
+            metodo = f"timeout({timeout_val})"
+
+        # Processa o método de busca para validação
+        metodo_validacao = st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_metodoBuscaValidacao", "indeterminado")
+        if metodo_validacao == "timeout":
+            timeout_val_valid = st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_timeout_validacao", "5")
+            metodo_validacao = f"timeout({timeout_val_valid})"
+
+        dadosGrupo = {
+            "metodo_busca": metodo,
+            "intervalo_entre_busca": st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_intervaloBusca", ""),
+            "validar_sucesso": st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_validarSucesso", "nao_validar"),
+            "metodo_busca_validacao": metodo_validacao,
+            "proximo_passo": st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_etapaBemSucedida", ""),
+            "proximo_passo_caso_validacao_falhar": st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_etapaSemSucesso", ""),
+            "imagens": st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_upload_upload_imagens", []),
+            "nome_arquivo_imagem": " | ".join(
+                [img['name'] for img in st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_upload_upload_imagens", [])]
+            ),
+            # --- CORRIGINDO A CHAVE DAS IMAGENS DE VALIDAÇÃO ---
+            "imagens_validacao": st.session_state.get(f"grupo{codigoUnico}_uploadValid_upload_imagens", []),
+            "nome_arquivo_imagem_validacao": " | ".join(
+                [img['name'] for img in st.session_state.get(f"grupo{codigoUnico}_uploadValid_upload_imagens", [])]
+            )
+        }
+
+        chaveListaAcoes = f"{PREFIXO_GRUPO(codigoUnico)}_acoes_listaAcoes"
+        listaAcoes = st.session_state.get(chaveListaAcoes, [])
+        dadosGrupo["procedimento_se_encontrar"] = processar_acoes(
+            codigoUnico,
+            listaAcoes,
+            lambda codigo, idx, tipo: obter_parametro_acao(codigo, idx, tipo)
+        )
+        relatorio["grupos"][codigoUnico] = dadosGrupo
+    return relatorio
+
+def importarEstado(dados):
+    for chave in list(st.session_state.keys()):
+        if str(chave).startswith("grupo"):
+            del st.session_state[chave]
+
+    if "ordemGrupos" in dados:
+        st.session_state["ordemGrupos"] = dados["ordemGrupos"]
+
+    for codigoUnico, dadosGrupo in dados.get("grupos", {}).items():
+        # Processa o método de busca normal
+        mb = dadosGrupo.get("metodo_busca", "buscar_ate_encontrar")
+        metodo, timeout_val = parse_timeout_field(mb, "2")
+        st.session_state[f"{PREFIXO_GRUPO(codigoUnico)}_metodoBusca"] = metodo
+        if metodo == "timeout":
+            st.session_state[f"{PREFIXO_GRUPO(codigoUnico)}_timeout_value"] = timeout_val
+
+        st.session_state[f"{PREFIXO_GRUPO(codigoUnico)}_intervaloBusca"] = dadosGrupo.get("intervalo_entre_busca", "1")
+        st.session_state[f"{PREFIXO_GRUPO(codigoUnico)}_validarSucesso"] = dadosGrupo.get("validar_sucesso", "nao_validar")
+
+        # Processa o método de busca para validação
+        mv = dadosGrupo.get("metodo_busca_validacao", "timeout(5)")
+        metodo_valid, timeout_valid_val = parse_timeout_field(mv, "5")
+        st.session_state[f"{PREFIXO_GRUPO(codigoUnico)}_metodoBuscaValidacao"] = metodo_valid
+        if metodo_valid == "timeout":
+            st.session_state[f"{PREFIXO_GRUPO(codigoUnico)}_timeout_validacao"] = timeout_valid_val
+
+        st.session_state[f"{PREFIXO_GRUPO(codigoUnico)}_etapaBemSucedida"] = dadosGrupo.get("proximo_passo", "")
+        st.session_state[f"{PREFIXO_GRUPO(codigoUnico)}_etapaSemSucesso"] = dadosGrupo.get("proximo_passo_caso_validacao_falhar", "")
+
+        # Processar imagens (novo formato com base64)
+        chave_upload = f"{PREFIXO_GRUPO(codigoUnico)}_upload_upload_imagens"
+        if "imagens" in dadosGrupo:  # Novo formato
+            st.session_state[chave_upload] = dadosGrupo["imagens"]
+        else:  # Compatibilidade com formato antigo
+            nomes_imagens = dadosGrupo.get("nome_arquivo_imagem", "").split(" | ") if dadosGrupo.get("nome_arquivo_imagem") else []
+            st.session_state[chave_upload] = [{"name": nome, "base64": ""} for nome in nomes_imagens]
+
+        # Processar procedimentos
+        procedimentos = dadosGrupo.get("procedimento_se_encontrar", [])
+        chaveListaAcoes = f"{PREFIXO_GRUPO(codigoUnico)}_acoes_listaAcoes"
+        st.session_state[chaveListaAcoes] = list(range(1, len(procedimentos) + 1))
+
+        for indice, acaoCompleta in enumerate(procedimentos, start=1):
+            tipoAcao, parametro = analisarAcao(acaoCompleta)
+            st.session_state[f"{PREFIXO_ACOES(codigoUnico, indice)}_select"] = tipoAcao
+            processar_import_acao(codigoUnico, indice, tipoAcao, parametro)
+
+import re
+
+def parse_timeout_field(valor, default_timeout):
+    """
+    Se valor for do formato timeout(4), retorna ("timeout", "4").
+    Caso contrário, retorna (valor, default_timeout).
+    """
+    match = re.match(r'timeout\((\d+)\)', valor)
+    if match:
+        return "timeout", match.group(1)
+    return valor, default_timeout
+
+def analisarAcao(acaoStr):
+    match = re.match(r'([^\[]+)(\[(.*)\])?', acaoStr)
+    if match:
+        tipo = match.group(1).strip()
+        parametro = match.group(3).strip() if match.group(3) else ""
+        return tipo, parametro
+    return acaoStr, ""
+
+def gerarConteudoTxt(codigoUnico):
+    ordem = st.session_state.get("ordemGrupos", [])
+    try:
+        indiceGrupo = ordem.index(codigoUnico) + 1
+    except ValueError:
+        indiceGrupo = 1
+
+    nomeEtapa = f"Etapa_{indiceGrupo}"
+
+    # Processa imagens do upload principal
+    chaveUpload = f"{PREFIXO_GRUPO(codigoUnico)}_upload_upload_imagens"
+    imagensEnviadas = st.session_state.get(chaveUpload, [])
+    nomeImagem = " | ".join(img['name'] for img in imagensEnviadas) if imagensEnviadas else ""
+
+    # Processa o método de busca
+    metodo = st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_metodoBusca", "")
+    if metodo == "timeout":
+        timeout_val = st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_timeout_value", "2")
+        metodo = f"timeout({timeout_val})"
+
+    # Processa a lista de ações
+    chaveListaAcoes = f"{PREFIXO_GRUPO(codigoUnico)}_acoes_listaAcoes"
+    listaAcoes = st.session_state.get(chaveListaAcoes, [])
+    procedimentos = processar_acoes(
+        codigoUnico,
+        listaAcoes,
+        lambda codigo, idx, tipo: obter_parametro_acao(codigo, idx, tipo)
+    )
+    procedimentosStr = " | ".join(procedimentos)
+
+    # Processa o campo "Validar Sucesso"
+    validarSucessoVal = st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_validarSucesso", "nao_validar")
+
+    # Processa o método de busca para validação
+    metodo_validacao = st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_metodoBuscaValidacao", "indeterminado")
+    if metodo_validacao == "timeout":
+        timeout_valid_val = st.session_state.get(f"{PREFIXO_GRUPO(codigoUnico)}_timeout_validacao", "5")
+        metodo_validacao = f"timeout({timeout_valid_val})"
+
+    # Processa as imagens de validação
+    # ATENÇÃO: A chave correta é "grupo{codigoUnico}_uploadValid_upload_imagens"
+    chaveUploadValid = f"grupo{codigoUnico}_uploadValid_upload_imagens"
+    imagensValidacao = st.session_state.get(chaveUploadValid, [])
+    imagensValidacaoNomes = " | ".join(img['name'] for img in imagensValidacao) if imagensValidacao else ""
+
+    # Se o validar_sucesso for dos tipos que demandam imagem, inclua os nomes
+    if validarSucessoVal in ["encontrar_imagem_", "nao_encontrar_imagem_"]:
+        validarStr = f"{validarSucessoVal}[{imagensValidacaoNomes}]"
+    else:
+        validarStr = validarSucessoVal
+
+    # Monta o conteúdo final do TXT, incluindo o campo de imagens de validação
+    conteudo = [
+        f"sequencia: {indiceGrupo}",
+        f"nome_arquivo_imagem: {nomeImagem}",
+        f"confidence: 0.8",
+        f"region: none",
+        f"metodo_busca: {metodo}",
+        f"intervalo_entre_busca: {st.session_state.get(f'{PREFIXO_GRUPO(codigoUnico)}_intervaloBusca', '')}",
+        f"procedimento_se_encontrar: {procedimentosStr}",
+        f"validar_sucesso: {validarStr}",
+        f"metodo_busca_validacao: {metodo_validacao}",
+        f"proximo_passo: {st.session_state.get(f'{PREFIXO_GRUPO(codigoUnico)}_etapaBemSucedida', '')}",
+        f"proximo_passo_caso_validacao_falhar: {st.session_state.get(f'{PREFIXO_GRUPO(codigoUnico)}_etapaSemSucesso', '')}",
+        f"imagens_validacao: {imagensValidacaoNomes}"
+    ]
+    return "\n".join(conteudo)

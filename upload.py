@@ -1,4 +1,4 @@
-# upload.py
+# --- Início de upload.py ---
 import streamlit as st
 from PIL import Image
 import base64
@@ -49,10 +49,17 @@ def renderizarImagens(prefixoChave: str, largura: int):
     imagensEnviadas = st.session_state.get(chaveEstado, [])
     if imagensEnviadas:
         st.markdown("### Imagens")
-        for img in imagensEnviadas:
-            imgBytes = base64.b64decode(img["base64"])
-            st.image(imgBytes, caption=img["name"], width=largura)
+        for i in range(0, len(imagensEnviadas), 3):
+            cols = st.columns(3)
+            for j in range(3):
+                indice = i + j
+                if indice < len(imagensEnviadas):
+                    img = imagensEnviadas[indice]
+                    imgBytes = base64.b64decode(img["base64"])
+                    cols[j].image(imgBytes, caption=img["name"], width=largura)
 
 def renderizarAreaUpload(config: dict = CONFIG_UPLOAD_PADRAO, prefixoChave: str = ""):
     processarUpload(config, prefixoChave)
     renderizarImagens(prefixoChave, config.get("width", 100))
+
+# --- Fim de upload.py ---

@@ -1,120 +1,116 @@
-# --- Início de actions.py ---
+#actions.py
 import streamlit as st
+import logging
+import re
 
-DEFAULT_ACTIONS_CONFIG = {
+CONFIG_ACOES_PADRAO = {
     "placeholder_text": "Escreva algo",
     "opcoes": [
-        "",
-        "clicar_centro",
-        "duplo_clique_centro",
-        "clicar_botao_direito",
-        "mover_mouse_para_centro",
-        "captura_salva_area",
-        "captura_tela_completa",
-        "atalho_hotkey",
-        "pressionar_teclas_basicas",
-        "escrever_texto",
-        "voltar_para_etapa",
-        "pular_para_etapa",
-        "inserir_item_lista"
+        "", "aguardar", "avancar_item_lista", "clicar_centro", "duplo_clique_centro",
+        "clicar_botao_direito", "mover_mouse_para_centro", "captura_salva_area",
+        "captura_tela_completa", "atalho_hotkey", "pressionar_teclas_basicas",
+        "escrever_texto", "voltar_para_etapa", "pular_para_etapa", "inserir_item_lista",
+        "verificar_continuidade"
     ],
-    "atalho_options": ["", "ctrl+v", "ctrl+c", "shift+left", "shift+right"],
-    "teclas_basicas_options": ["", "enter", "esc", "left", "right"]
+    "atalho_options": ["", "ctrl+v", "ctrl+c", "ctrl+p", "shift+left", "shift+right"],
+    "teclas_basicas_options": ["", "enter", "esc", "left", "right", "win"],
 }
 
-def render_action_line(action_index, config=DEFAULT_ACTIONS_CONFIG, key_prefix=""):
-    """
-    Renderiza uma linha de ação usando um índice sequencial para compor as chaves.
-    Exemplo de chave: "group1_acao1_select"
-    """
-    opcoes = config.get("opcoes", [])
-    placeholder = config.get("placeholder_text", "Escreva algo")
-    atalho_options = config.get("atalho_options", [])
-    teclas_options = config.get("teclas_basicas_options", [])
-
-    # Chave para o select da ação, ex: "group1_acao1_select"
-    key_select = f"{key_prefix}_acao{action_index}_select"
-    if key_select not in st.session_state:
-        st.session_state[key_select] = opcoes[0]
-
+def renderizarLinhaAcao(indiceAcao, config, prefixoChave):
+    chaveSelect = f"{prefixoChave}_acao{indiceAcao}_select"
+    options = config.get("opcoes", [])
+    if chaveSelect not in st.session_state or st.session_state[chaveSelect] not in options:
+        st.session_state[chaveSelect] = options[0]
     acao = st.selectbox(
-        f"Ação {action_index}",
-        opcoes,
-        index=opcoes.index(st.session_state[key_select]),
-        key=key_select
+        f"Ação {indiceAcao}",
+        options,
+        index=options.index(st.session_state[chaveSelect]),
+        key=chaveSelect
     )
+    logging.debug("Linha de ação definida: %s = %s", chaveSelect, acao)
 
-    # Dependendo da ação selecionada, renderiza campos extras com chaves contextuais
-    if acao in ["escrever_texto", "inserir_item_lista"]:
-        key_text = f"{key_prefix}_acao{action_index}_texto"
-        if key_text not in st.session_state:
-            st.session_state[key_text] = ""
-        st.text_input(
+    if acao in ["escrever_texto", "inserir_item_lista", "verificar_continuidade"]:
+        chaveTexto = f"{prefixoChave}_acao{indiceAcao}_texto"
+        if chaveTexto not in st.session_state:
+            st.session_state[chaveTexto] = ""
+        texto = st.text_input(
             "Texto",
-            value=st.session_state[key_text],
-            placeholder=placeholder,
-            key=key_text
+            value=st.session_state[chaveTexto],
+            placeholder=config.get("placeholder_text", "Escreva algo"),
+            key=chaveTexto
         )
+        logging.debug("Campo de texto para %s: %s", chaveTexto, texto)
     elif acao == "atalho_hotkey":
-        key_atalho = f"{key_prefix}_acao{action_index}_atalho"
-        if key_atalho not in st.session_state:
-            st.session_state[key_atalho] = atalho_options[0]
-        st.selectbox(
+        chaveAtalho = f"{prefixoChave}_acao{indiceAcao}_atalho"
+        if chaveAtalho not in st.session_state:
+            st.session_state[chaveAtalho] = config.get("atalho_options", [])[0]
+        atalho = st.selectbox(
             "Atalho",
-            atalho_options,
-            index=atalho_options.index(st.session_state[key_atalho]),
-            key=key_atalho
+            config.get("atalho_options", []),
+            index=config.get("atalho_options", []).index(st.session_state[chaveAtalho]),
+            key=chaveAtalho
         )
+        logging.debug("Campo de atalho para %s: %s", chaveAtalho, atalho)
     elif acao == "pressionar_teclas_basicas":
-        key_tecla = f"{key_prefix}_acao{action_index}_tecla"
-        if key_tecla not in st.session_state:
-            st.session_state[key_tecla] = teclas_options[0]
-        st.selectbox(
+        chaveTecla = f"{prefixoChave}_acao{indiceAcao}_tecla"
+        if chaveTecla not in st.session_state:
+            st.session_state[chaveTecla] = config.get("teclas_basicas_options", [])[0]
+        tecla = st.selectbox(
             "Tecla",
-            teclas_options,
-            index=teclas_options.index(st.session_state[key_tecla]),
-            key=key_tecla
+            config.get("teclas_basicas_options", []),
+            index=config.get("teclas_basicas_options", []).index(st.session_state[chaveTecla]),
+            key=chaveTecla
         )
-
+        logging.debug("Campo de tecla para %s: %s", chaveTecla, tecla)
+    elif acao == "aguardar":
+        chaveAguardar = f"{prefixoChave}_acao{indiceAcao}_aguardar"
+        if chaveAguardar not in st.session_state:
+            st.session_state[chaveAguardar] = ""
+        tempo = st.text_input(
+            "Tempo de espera (segundos)",
+            value=st.session_state[chaveAguardar],
+            placeholder="Insira um número (em segundos)",
+            key=chaveAguardar
+        )
+        logging.debug("Campo de tempo para %s: %s", chaveAguardar, tempo)
     return acao
 
-def render_actions_area(config=DEFAULT_ACTIONS_CONFIG, key_prefix=""):
-    """
-    Renderiza a área de ações de um grupo usando índices contextuais.
-    Cada ação é identificada de forma sequencial (ex.: acao1, acao2, ...).
-    """
+def removerCampoAcao(indiceAcao, prefixoChave):
+    prefixo = f"{prefixoChave}_acao{indiceAcao}_"
+    keysToRemove = [key for key in st.session_state if key.startswith(prefixo)]
+    for key in keysToRemove:
+        del st.session_state[key]
+        logging.debug("Removendo chave: %s", key)
+
+def adicionarCampoAcao(listaAcoes, indice, prefixoChave):
+    novoIndiceAcao = max(listaAcoes) + 1 if listaAcoes else 1
+    novaLista = listaAcoes[:indice+1] + [novoIndiceAcao] + listaAcoes[indice+1:]
+    st.session_state[f"{prefixoChave}_listaAcoes"] = novaLista
+    logging.debug("Adicionada nova ação: novoIndiceAcao=%s, novaLista=%s", novoIndiceAcao, novaLista)
+    st.rerun()
+
+def renderizarAreaAcoes(config=CONFIG_ACOES_PADRAO, prefixoChave=""):
     st.markdown("### Sequência de Ações")
+    chaveListaAcoes = f"{prefixoChave}_listaAcoes"
+    if chaveListaAcoes not in st.session_state:
+        st.session_state[chaveListaAcoes] = [1]
+    listaAcoes = st.session_state[chaveListaAcoes]
 
-    # Inicializa ou obtém a lista de índices das ações, ex: [1, 2]
-    actions_key = f"{key_prefix}_acoes_list"
-    if actions_key not in st.session_state:
-        st.session_state[actions_key] = [1]  # inicia com a ação 1
-
-    acoes = []
-    for action_index in st.session_state[actions_key]:
-        acao = render_action_line(action_index, config, key_prefix)
-        acoes.append(acao)
-
-    # Botões para adicionar ou remover ações usando chaves contextuais
-    col_plus, col_trash = st.columns([0.1, 1])
-    with col_plus:
-        if st.button("➕", key=f"{key_prefix}_add_action"):
-            # Gera o próximo índice sequencial (ex.: se [1,2] então novo será 3)
-            novo_indice = max(st.session_state[actions_key]) + 1 if st.session_state[actions_key] else 1
-            st.session_state[actions_key].append(novo_indice)
-            st.rerun()
-    with col_trash:
-        if st.button("🗑️", key=f"{key_prefix}_remove_action"):
-            if len(st.session_state[actions_key]) > 1:
-                removed_index = st.session_state[actions_key].pop()
-                # Limpa todas as chaves referentes à ação removida
-                for key in list(st.session_state.keys()):
-                    if key.startswith(f"{key_prefix}_acao{removed_index}_"):
-                        del st.session_state[key]
-                st.rerun()
-            else:
-                st.warning("Pelo menos uma linha de ação é necessária.")
-
-    return acoes
-
-# --- Fim de actions.py ---
+    for i, indiceAcao in enumerate(listaAcoes):
+        cols = st.columns([4, 1, 1])
+        with cols[0]:
+            acao = renderizarLinhaAcao(indiceAcao, config, prefixoChave)
+        with cols[1]:
+            if st.button("➕", key=f"{prefixoChave}_add_{indiceAcao}"):
+                adicionarCampoAcao(listaAcoes, i, prefixoChave)
+        with cols[2]:
+            if st.button("–", key=f"{prefixoChave}_remove_{indiceAcao}"):
+                if len(listaAcoes) > 1:
+                    removerCampoAcao(indiceAcao, prefixoChave)
+                    novaLista = [idx for idx in listaAcoes if idx != indiceAcao]
+                    st.session_state[chaveListaAcoes] = novaLista
+                    logging.debug("Removida ação: indiceAcao=%s, novaLista=%s", indiceAcao, novaLista)
+                    st.rerun()
+                else:
+                    st.warning("Pelo menos uma linha de ação é necessária.")
+    return listaAcoes

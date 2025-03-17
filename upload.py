@@ -1,10 +1,10 @@
-# --- Início de upload.py ---
+# upload.py
 import streamlit as st
 from PIL import Image
 import base64
 from io import BytesIO
 
-DEFAULT_UPLOAD_CONFIG = {
+CONFIG_UPLOAD_PADRAO = {
     "label": "Carregar imagens",
     "tipos": ["png", "jpg", "jpeg"],
     "multiple": True,
@@ -12,48 +12,47 @@ DEFAULT_UPLOAD_CONFIG = {
     "max_size": 2 * 1024 * 1024  # 2 MB
 }
 
-def convert_image_to_base64(image: Image.Image) -> str:
-    buffered = BytesIO()
-    image.save(buffered, format="PNG")
-    return base64.b64encode(buffered.getvalue()).decode()
+def converterImagemParaBase64(imagem: Image.Image) -> str:
+    buffer = BytesIO()
+    imagem.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode()
 
-def render_upload_area(config: dict = DEFAULT_UPLOAD_CONFIG, key_prefix: str = ""):
-    label = config.get("label", "Carregar imagens")
-    file_types = config.get("tipos", ["png", "jpg", "jpeg"])
-    multiple = config.get("multiple", True)
-    width = config.get("width", 100)
-    max_size = config.get("max_size", 2 * 1024 * 1024)
-
-    arquivos = st.file_uploader(label, type=file_types, accept_multiple_files=multiple, key=f"{key_prefix}_file_uploader")
-    state_key = f"{key_prefix}_uploaded_images"
-    if state_key not in st.session_state:
-        st.session_state[state_key] = []
-
+def processarUpload(config: dict, prefixoChave: str):
+    rotulo = config.get("label", "Carregar imagens")
+    tiposArquivos = config.get("tipos", ["png", "jpg", "jpeg"])
+    permitirMultiplos = config.get("multiple", True)
+    tamanhoMaximo = config.get("max_size", 2 * 1024 * 1024)
+    arquivos = st.file_uploader(rotulo, type=tiposArquivos, accept_multiple_files=permitirMultiplos, key=f"{prefixoChave}_fileUploader")
+    chaveEstado = f"{prefixoChave}_upload_imagens"
+    if chaveEstado not in st.session_state:
+        st.session_state[chaveEstado] = []
     if arquivos:
         for arquivo in arquivos:
-            if arquivo.size > max_size:
+            if arquivo.size > tamanhoMaximo:
                 st.error(f"O arquivo {arquivo.name} excede o tamanho máximo permitido (2 MB).")
                 continue
-            exists = any(img.get("name") == arquivo.name for img in st.session_state[state_key])
-            if not exists:
+            jaExiste = any(img.get("name") == arquivo.name for img in st.session_state[chaveEstado])
+            if not jaExiste:
                 try:
-                    image = Image.open(arquivo)
-                    img_base64 = convert_image_to_base64(image)
-                    st.session_state[state_key].append({
+                    imagem = Image.open(arquivo)
+                    imgBase64 = converterImagemParaBase64(imagem)
+                    st.session_state[chaveEstado].append({
                         "name": arquivo.name,
-                        "base64": img_base64
+                        "base64": imgBase64
                     })
-                except Exception as e:
-                    st.error(f"Erro ao carregar {arquivo.name}: {e}")
-
-    uploaded_images = st.session_state.get(state_key, [])
-    if uploaded_images:
-        st.markdown("### Imagens")
-        for img in uploaded_images:
-            img_bytes = base64.b64decode(img["base64"])
-            st.image(img_bytes, caption=img["name"], width=width)
-
+                except Exception as erro:
+                    st.error(f"Erro ao carregar {arquivo.name}: {erro}")
     return arquivos
 
+def renderizarImagens(prefixoChave: str, largura: int):
+    chaveEstado = f"{prefixoChave}_upload_imagens"
+    imagensEnviadas = st.session_state.get(chaveEstado, [])
+    if imagensEnviadas:
+        st.markdown("### Imagens")
+        for img in imagensEnviadas:
+            imgBytes = base64.b64decode(img["base64"])
+            st.image(imgBytes, caption=img["name"], width=largura)
 
-# --- Fim de upload.py ---
+def renderizarAreaUpload(config: dict = CONFIG_UPLOAD_PADRAO, prefixoChave: str = ""):
+    processarUpload(config, prefixoChave)
+    renderizarImagens(prefixoChave, config.get("width", 100))
